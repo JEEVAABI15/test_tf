@@ -1,0 +1,17 @@
+---
+- name: Install dependencies for the base image
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update apt package index
+      command: >
+        sudo apt update
+
+    - name: Install Apache
+      command: >
+        sudo apt install apache2 -y
+
+    - name: Install OpenJDK 17
+      command: >
+        sudo apt install openjdk-17-jdk -y
+

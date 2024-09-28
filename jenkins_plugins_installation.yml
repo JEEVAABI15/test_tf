@@ -1,0 +1,81 @@
+---
+- name: Jenkins server starting and installing plugins and making connection with instance
+  hosts: my_ec2
+  become: true
+  vars:
+    public_ip: "{{ ansible_host }}"
+  tasks:
+    - name: Update package lists
+      apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Start and enable Docker service
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Run Jenkins container
+      docker_container:
+        name: jenkins
+        image: jenkins/jenkins:lts
+        state: started
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        user: root
+
+    - name: Wait for Jenkins to start
+      wait_for:
+        port: 8080
+        delay: 120
+
+    - name: Download Jenkins CLI
+      get_url:
+        url: http://{{ public_ip }}:8080/jnlpJars/jenkins-cli.jar
+        dest: /tmp/jenkins-cli.jar
+
+    - name: Retrieve the initial admin password
+      command: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+      register: admin_password
+
+    - name: Install Git plugin
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} install-plugin git
+
+    - name: Install SonarQube plugin
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} install-plugin sonar:2.17.2
+
+    - name: Install pipeline workflow-aggregator plugin
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} install-plugin workflow-aggregator:600.vb_57cdd26fdd7
+
+    - name: Ensure .ssh directory exists in Jenkins Container
+      command: >
+        sudo docker exec jenkins bash -c "mkdir -p /root/.ssh"
+
+    - name: Generate SSH Key for Jenkins Container
+      command: >
+        sudo docker exec jenkins bash -c "ssh-keygen -t rsa -b 2048 -f root/.ssh/id_rsa"
+
+    - name: Append SSH Public Key to authorized_keys
+      command: >
+        sudo docker exec jenkins bash -c "cat /root/.ssh/id_rsa.pub >> /root/.ssh/authorized_keys"
+
+    - name: Give Permission for authorized Keys
+      command: >
+        sudo touch ~/.ssh/authorized_keys
+
+    - name: Give Permission for authorized Keys
+      command: >
+        chmod 600 ~/.ssh/authorized_keys
+
+    - name: Make Ubuntu Owner of /var/www/html
+      command: >
+        sudo chown -R ubuntu:ubuntu /var/www/html

@@ -1,0 +1,143 @@
+---
+- name: Create and manage Jenkins multi-stage pipeline for SonarQube analysis and deployment
+  hosts: my_ec2
+  become: true
+  vars:
+    project_name: "vitePipeline"
+    public_ip: "{{ ansible_host }}"
+    pipeline_definition: |
+      <?xml version='1.0' encoding='UTF-8'?>
+      <flow-definition>
+        <description>Pipeline for SonarQube analysis and deployment</description>
+        <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.78">
+          <script>
+          pipeline {
+              agent any
+              environment {
+                  VM_SSH = "ubuntu@{{ public_ip }}"
+                  SONARQUBE_URL = 'http://{{ public_ip }}:9000'
+                  SONARQUBE_TOKEN = "{{ sonar_t }}"
+                  SONARQUBE_PASSWORD = 'admin123'
+              }
+              stages {
+                  stage("Checkout Code") {
+                      steps {
+                          script {
+                              echo "Pulling the repository"
+                              git url: 'https://github.com/JEEVAABI15/my-project', branch: 'main'
+                          }
+                      }
+                  }
+                  stage("SonarQube Analysis") {
+                      steps {
+                          script {
+                                echo "Running SonarQube analysis"
+              
+                                sh '''
+                                /opt/sonar-scanner/bin/sonar-scanner \
+                                -Dsonar.projectKey=vite_project \
+                                -Dsonar.sources=. \
+                                -Dsonar.host.url=${SONARQUBE_URL} \
+                                -Dsonar.login=${SONARQUBE_TOKEN}
+                                '''
+                          }
+                      }
+                  }
+                  stage('Check SonarQube Task Status') {
+                      steps {
+                          script {
+                              dir('.scannerwork') {
+                                  def ceTaskId = sh(script: "grep 'ceTaskId' report-task.txt | cut -d'=' -f2", returnStdout: true).trim()
+                                  def taskStatus = sh(script: "curl -u admin:${SONARQUBE_PASSWORD} ${SONARQUBE_URL}/api/ce/task?id=${ceTaskId}", returnStdout: true).trim()
+                                  if (taskStatus.contains('"status":"FAILED"')) {
+                                      error "SonarQube analysis failed!"
+                                  } else if (taskStatus.contains('"status":"SUCCESS"')) {
+                                      echo "SonarQube analysis passed!"
+                                  } else {
+                                      echo "SonarQube analysis is still in progress."
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  stage("Move Files to VM for Apache Hosting") {
+                      steps {
+                          script {
+                              echo "Moving build files to /var/www/html on AWS VM"
+                              sh '''
+                              scp -r * ${VM_SSH}:/var/www/html
+                              '''
+                          }
+                      }
+                  }
+                  stage("Restart Apache2 Service") {
+                      steps {
+                          script {
+                              echo "Restarting Apache2 on AWS VM"
+                              sh '''
+                              ssh ${VM_SSH} "sudo systemctl restart apache2"
+                              '''
+                          }
+                      }
+                  }
+              }
+          }
+          </script>
+          <sandbox>true</sandbox>
+        </definition>
+      </flow-definition>
+  tasks:
+    - name: Retrieve the initial admin password
+      command: docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+      register: admin_password
+
+    - name : Publish Initial Admin Password
+      debug:
+        msg: "Jenkins Credentials User: admin Password: {{ admin_password.stdout }}"
+
+    - name: Start Jenkins Docker container
+      command: sudo docker restart jenkins
+      register: jenkins_restart_output
+
+    - name: Display Jenkins restart output
+      debug:
+        var: jenkins_restart_output.stdout
+
+    - name: Read the SonarQube token from file in /tmp
+      command: cat /tmp/sonarqube_token.txt
+      register: sonar_token_output
+
+    - set_fact:
+        sonar_t: "{{ sonar_token_output.stdout }}"
+
+    - debug:
+        msg: "The SonarQube token is: {{ sonar_t }}"
+
+    - name: Create the multi-stage pipeline job
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} create-job {{ project_name }}
+      args:
+        stdin: "{{ pipeline_definition }}"
+      environment:
+        SONARQUBE_TOKEN: "{{ sonar_t }}"
+
+    - name: Build the multi-stage pipeline job
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} build {{ project_name }}
+
+    - name: Pause for a few seconds after job creation
+      pause:
+        seconds: 30
+
+    - name: Get the latest build number of the pipeline job
+      shell: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} get-job {{ project_name }} | grep '<lastBuild>' | sed -n 's/.*<number>\(.*\)<\/number>/\1/p'
+      register: build_number
+
+    - name: Get the console output of the latest build
+      command: >
+        java -jar /tmp/jenkins-cli.jar -s http://{{ public_ip }}:8080/ -auth admin:{{ admin_password.stdout }} console {{ project_name }} {{ build_number.stdout }}
+      register: console_output
+
+    - debug:
+        var: console_output.stdout

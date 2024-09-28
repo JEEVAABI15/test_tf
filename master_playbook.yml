@@ -1,0 +1,11 @@
+---
+- import_playbook: install_image_dependencies.yml
+
+- import_playbook: jenkins_plugins_installation.yml
+
+- import_playbook: sonar_scanner_installation.yml
+
+- import_playbook: sonar_automation_final.yml
+
+- import_playbook: jenkins_job_creation.yml
+

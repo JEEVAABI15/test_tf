@@ -1,0 +1,40 @@
+---
+- name: Install SonarQube Scanner
+  hosts: my_ec2
+  become: true
+  vars:
+    sonar_scanner_version: "4.7.0.2747"
+    sonar_scanner_url: "https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-{{ sonar_scanner_version }}-linux.zip"
+    sonar_scanner_dir: "/opt/sonar-scanner"
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name: unzip
+        state: present
+
+    - name: Download SonarQube Scanner
+      get_url:
+        url: "{{ sonar_scanner_url }}"
+        dest: "/tmp/sonar-scanner-cli-{{ sonar_scanner_version }}.zip"
+
+    - name: Unzip SonarQube Scanner
+      unarchive:
+        src: "/tmp/sonar-scanner-cli-{{ sonar_scanner_version }}.zip"
+        dest: "/tmp/"
+        remote_src: yes
+
+    - name: Set use_embed_jre
+      lineinfile:
+        path: "/tmp/sonar-scanner-{{ sonar_scanner_version }}-linux/bin/sonar-scanner"
+        regexp: 'use_embedded_jre=true'
+        line: 'use_embedded_jre=false'
+
+    - name: Move SonarQube Scanner to /opt
+      command: >
+        docker cp /tmp/sonar-scanner-{{ sonar_scanner_version }}-linux jenkins:{{ sonar_scanner_dir }}
+
+    - name: Give permission to jenkins
+      command: >
+        docker exec jenkins chmod +x {{ sonar_scanner_dir }}/bin/sonar-scanner
+

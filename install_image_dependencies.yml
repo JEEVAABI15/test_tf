@@ -1,0 +1,53 @@
+---
+- name: Create Jenkins & Sonarqube container
+  hosts: my_ec2
+  become: yes
+  tasks:
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - docker.io
+        - docker-compose
+        - openjdk-11-jdk
+
+    - name: Ensure Docker is running
+      service:
+        name: docker
+        state: started
+
+    - name: Pull Jenkins Docker image
+      docker_image:
+        name: jenkins/jenkins
+        tag: lts
+        source: pull
+
+    - name: Run Jenkins container
+      docker_container:
+        name: jenkins
+        image: jenkins/jenkins:lts
+        state: started
+        ports:
+          - "8080:8080"
+          - "50000:50000"
+        restart_policy: always
+
+    - name: Pull SonarQube Docker image
+      docker_image:
+        name: sonarqube
+        tag: lts
+        source: pull
+
+    - name: Run SonarQube container
+      docker_container:
+        name: sonarqube
+        image: sonarqube:lts
+        state: started
+        ports:
+          - "9000:9000"
+        restart_policy: always

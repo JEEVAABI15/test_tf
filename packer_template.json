@@ -1,0 +1,25 @@
+{
+  "variables": {
+    "aws_region": "us-east-2",
+    "source_ami": "ami-085f9c64a9b75eed5",
+    "instance_type": "t2.micro"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "region": "{{ user `aws_region` }}",
+      "source_ami": "{{ user `source_ami` }}",
+      "instance_type": "{{ user `instance_type` }}",
+      "ssh_username": "ubuntu",
+      "ami_name": "custom-ami-vite-{{timestamp}}",
+      "ami_description": "Custom AMI with Vite setup"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "ansible",
+      "playbook_file": "./install_dependencies.yml"
+    }
+  ]
+}
+
